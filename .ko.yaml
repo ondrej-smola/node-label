@@ -1,0 +1,24 @@
+# ko configuration for node-label-controller
+
+# This configuration allows building and publishing the node-label-controller image using ko.
+
+# By default, ko looks for a main package in the current directory or as specified in the importpath.
+
+# To build and publish:
+#   ko build ./cmd/controller
+#   ko publish ./cmd/controller
+
+# Optionally, you can specify the base image and platforms in .ko.yaml
+
+builds:
+  - id: node-label-controller
+    main: ./cmd/controller
+    ldflags:
+      - "-s -w"
+    env:
+      - CGO_ENABLED=0
+
+defaultBaseImage: gcr.io/distroless/static-debian12@sha256:5c7e2b465ac6a2a4e5f4f7f722ce43b147dabe87cb21ac6c4007ae5178a1fa58
+defaultPlatforms:
+  - linux/arm64
+  - linux/amd64
