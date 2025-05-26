@@ -27,7 +27,7 @@ type Controller struct {
 	clientset  kubernetes.Interface
 	nodeLister listerscorev1.NodeLister
 	nodeSynced cache.InformerSynced
-	workqueue  workqueue.RateLimitingInterface
+	workqueue  workqueue.TypedRateLimitingInterface[string]
 }
 
 func NewController(clientset kubernetes.Interface) *Controller {
@@ -41,7 +41,7 @@ func NewController(clientset kubernetes.Interface) *Controller {
 		clientset:  clientset,
 		nodeLister: listerscorev1.NewNodeLister(nodeInformer.GetIndexer()),
 		nodeSynced: nodeInformer.HasSynced,
-		workqueue:  workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Nodes"),
+		workqueue:  workqueue.NewTypedRateLimitingQueue[string](workqueue.DefaultTypedControllerRateLimiter[string]()),
 	}
 
 	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -107,22 +107,20 @@ func (c *Controller) processNextWorkItem(ctx context.Context) bool {
 	}
 
 	err := func(obj any) error {
-		defer c.workqueue.Done(obj)
-		var key string
-		var ok bool
-
-		if key, ok = obj.(string); !ok {
-			c.workqueue.Forget(obj)
+		key, ok := obj.(string)
+		if !ok {
+			c.workqueue.Forget("")
 			runtime.HandleError(fmt.Errorf("expected string in workqueue but got %#v", obj))
 			return nil
 		}
+		defer c.workqueue.Done(key)
 
 		if err := c.syncHandler(ctx, key); err != nil {
 			c.workqueue.AddRateLimited(key)
 			return fmt.Errorf("error syncing '%s': %s, requeuing", key, err.Error())
 		}
 
-		c.workqueue.Forget(obj)
+		c.workqueue.Forget(key)
 		slog.Info("Successfully synced", "key", key)
 		return nil
 	}(obj)
