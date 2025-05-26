@@ -19,7 +19,7 @@ import (
 
 const (
 	labelKey      = "altinity.cloud/auto-zone"
-	taintLabelKey = "altinity.cloud/auto-taints"
+	taintLabelKey = "altinity.cloud/auto-taint"
 	zoneLabel     = "topology.kubernetes.io/zone"
 )
 
@@ -167,9 +167,23 @@ func (c *Controller) syncHandler(ctx context.Context, key string) error {
 	// Handle taints
 	taintValue, hasTaints := node.Labels[taintLabelKey]
 	if hasTaints && taintValue != "" {
-		taints, err := parseTaints(taintValue)
-		if err != nil {
-			return fmt.Errorf("failed to parse taints for node %s: %v", node.Name, err)
+		var taints []corev1.Taint
+		switch taintValue {
+		case "clickhouse":
+			taints = []corev1.Taint{{
+				Key:    "dedicated",
+				Value:  "clickhouse",
+				Effect: corev1.TaintEffectNoSchedule,
+			}}
+		case "zookeeper":
+			taints = []corev1.Taint{{
+				Key:    "dedicated",
+				Value:  "zookeeper",
+				Effect: corev1.TaintEffectNoSchedule,
+			}}
+		default:
+			slog.Error("invalid value for taint label", "label", taintLabelKey, "value", taintValue, "node", node.Name)
+			// do nothing
 		}
 
 		if len(taints) > 0 {
