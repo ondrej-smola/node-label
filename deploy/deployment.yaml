@@ -1,32 +1,31 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: node-label-controller
+  name: node-auto-zone
   namespace: kube-system
   labels:
-    app: node-label-controller
+    app: node-auto-zone
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: node-label-controller
+      app: node-auto-zone
   template:
     metadata:
       labels:
-        app: node-label-controller
+        app: node-auto-zone
     spec:
-      serviceAccountName: node-label-controller
+      serviceAccountName: node-auto-zone
       containers:
       - name: controller
-        image: ondrejsmola/node-auto-label:latest
+        image: ondrejsmola/node-auto-zone:0.0.1
         imagePullPolicy: IfNotPresent
         resources:
           limits:
-            memory: "128Mi"
-            cpu: "100m"
+            memory: "64Mi"
           requests:
             memory: "64Mi"
-            cpu: "50m"
+            cpu: "10m"
         securityContext:
           runAsNonRoot: true
           runAsUser: 65532

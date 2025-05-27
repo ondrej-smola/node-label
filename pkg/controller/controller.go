@@ -21,8 +21,7 @@ import (
 )
 
 const (
-	labelKey      = "altinity.cloud/auto-zone"
-	taintLabelKey = "altinity.cloud/auto-taint"
+	labelKey      = "altinity.cloud/auto-zone"	
 	zoneLabel     = "topology.kubernetes.io/zone"
 	zoneOldLabel  = "failure-domain.beta.kubernetes.io/zone"
 )
