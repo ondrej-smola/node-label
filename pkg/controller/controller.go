@@ -2,12 +2,15 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	informerscorev1 "k8s.io/client-go/informers/core/v1"
@@ -21,6 +24,7 @@ const (
 	labelKey      = "altinity.cloud/auto-zone"
 	taintLabelKey = "altinity.cloud/auto-taint"
 	zoneLabel     = "topology.kubernetes.io/zone"
+	zoneOldLabel  = "failure-domain.beta.kubernetes.io/zone"
 )
 
 type Controller struct {
@@ -33,7 +37,7 @@ type Controller struct {
 func NewController(clientset kubernetes.Interface) *Controller {
 	nodeInformer := informerscorev1.NewNodeInformer(
 		clientset,
-		time.Second*30,
+		30*time.Second,
 		cache.Indexers{},
 	)
 
@@ -41,7 +45,7 @@ func NewController(clientset kubernetes.Interface) *Controller {
 		clientset:  clientset,
 		nodeLister: listerscorev1.NewNodeLister(nodeInformer.GetIndexer()),
 		nodeSynced: nodeInformer.HasSynced,
-		workqueue:  workqueue.NewTypedRateLimitingQueue[string](workqueue.DefaultTypedControllerRateLimiter[string]()),
+		workqueue:  workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[string]()),
 	}
 
 	_, err := nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -65,13 +69,12 @@ func NewController(clientset kubernetes.Interface) *Controller {
 }
 
 func (c *Controller) enqueueNode(obj interface{}) {
-	var key string
-	var err error
-	if key, err = cache.MetaNamespaceKeyFunc(obj); err != nil {
+	if key, err := cache.MetaNamespaceKeyFunc(obj); err != nil {
 		runtime.HandleError(err)
 		return
+	} else {
+		c.workqueue.Add(key)
 	}
-	c.workqueue.Add(key)
 }
 
 func (c *Controller) Run(ctx context.Context, workers int) error {
@@ -143,58 +146,53 @@ func (c *Controller) syncHandler(ctx context.Context, key string) error {
 		return err
 	}
 
-	// Always add altinity.cloud/use=anywhere label
-	labels := map[string]string{
-		"altinity.cloud/use": "anywhere",
-	}
-	if err := c.applyLabels(ctx, node, labels); err != nil {
-		return fmt.Errorf("failed to apply 'altinity.cloud/use=anywhere' label to node %s: %v", node.Name, err)
+	zone, ok := node.Labels[labelKey]
+	if !ok || zone == "" {
+		return nil
 	}
 
-	// Handle zone label
-	zoneValue, hasZone := node.Labels[labelKey]
-	if hasZone && zoneValue != "" {
-		labels := map[string]string{
-			zoneLabel: zoneValue,
-		}
-		if err := c.applyLabels(ctx, node, labels); err != nil {
-			return fmt.Errorf("failed to apply zone label to node %s: %v", node.Name, err)
-		}
+	if err := c.applyZoneLabel(ctx, node, zone); err != nil {
+		return fmt.Errorf("failed to apply labels to node %s: %v", node.Name, err)
 	}
 
-	// Handle taints
-	taintValue, hasTaints := node.Labels[taintLabelKey]
-	if hasTaints && taintValue != "" {
-		var taints []corev1.Taint
-		switch taintValue {
-		case "clickhouse":
-			taints = []corev1.Taint{{
-				Key:    "dedicated",
-				Value:  "clickhouse",
-				Effect: corev1.TaintEffectNoSchedule,
-			}}
-		case "zookeeper":
-			taints = []corev1.Taint{{
-				Key:    "dedicated",
-				Value:  "zookeeper",
-				Effect: corev1.TaintEffectNoSchedule,
-			}}
-		default:
-			slog.Error("invalid value for taint label", "label", taintLabelKey, "value", taintValue, "node", node.Name)
-			// do nothing
-		}
+	return nil
+}
 
-		if len(taints) > 0 {
-			if err := c.applyTaints(ctx, node, taints); err != nil {
-				return fmt.Errorf("failed to apply taints to node %s: %v", node.Name, err)
-			}
-		}
+func (c *Controller) applyZoneLabel(ctx context.Context, node *corev1.Node, zone string) error {
+	// Only patch if at least one of the zone labels is missing or has a different value
+	currentZone := node.Labels[zoneLabel]
+	currentOldZone := node.Labels[zoneOldLabel]
+	if currentZone == zone && currentOldZone == zone {
+		slog.Debug("Zone labels already set correctly, skipping patch", "node", node.Name, "zone", zone)
+		return nil
 	}
 
-	// If neither zone nor taints are present, skip
-	if !hasZone && !hasTaints {
-		slog.Debug("Node does not have zone or taint annotations, skipping", "node", node.Name)
+	patch := map[string]any{
+		"metadata": map[string]any{
+			"labels": map[string]string{
+				zoneLabel:    zone,
+				zoneOldLabel: zone,
+			},
+		},
 	}
 
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %v", err)
+	}
+
+	_, err = c.clientset.CoreV1().Nodes().Patch(
+		ctx,
+		node.Name,
+		types.StrategicMergePatchType,
+		patchBytes,
+		metav1.PatchOptions{},
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to patch node: %v", err)
+	}
+
+	slog.Info("Successfully applied zone label to node", "node", node.Name, "zone", zone)
 	return nil
 }

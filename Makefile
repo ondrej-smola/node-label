@@ -42,7 +42,7 @@ test-coverage:
 	go tool cover -html=cover.out -o coverage.html
 	rm -f cover.out
 
-KO_DOCKER_REPO ?= docker.io/ondrejsmola/auto-node-label
+KO_DOCKER_REPO ?= docker.io/ondrejsmola/auto-zone-label
 
 image-build: require-ko
 	KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko build ./cmd/controller --local -t $(VERSION) --bare

@@ -1,65 +1,46 @@
-# Altinity auto node-label
+# node-label-controller
 
-This controller automatically applies Kubernetes labels and taints to nodes based on special node labels.
+A Kubernetes controller that automatically applies zone labels to nodes based on custom labels.
 
-## Supported Node Labels
+## Overview
 
-- `altinity.cloud/auto-taint`: If set to `clickhouse` or `zookeeper`, applies a dedicated taint to the node. See below for details.
-- `altinity.cloud/auto-zone`: If set, this label will be automatically applied to the node as `topology.kubernetes.io/zone=<value>`. This is useful for custom or non-standard zone labeling.
-- The controller always adds the label `altinity.cloud/use=anywhere` to every node.
+This controller watches for nodes with the `altinity.cloud/auto-zone` label and automatically applies the standard Kubernetes zone labels to those nodes. This is useful for environments where nodes need custom zone assignment that differs from the cloud provider's default zone detection.
 
-## Taint Logic for `altinity.cloud/auto-taint`
+## How it Works
 
-If the node label `altinity.cloud/auto-taint` is set, the controller will apply a dedicated taint as follows:
+The controller continuously monitors all nodes in the cluster. When it detects a node with the `altinity.cloud/auto-zone` label, it automatically applies both current and legacy Kubernetes zone labels with the specified value.
 
-- If the value is `clickhouse`, the node will get the taint:
-  - `dedicated=clickhouse:NoSchedule`
-- If the value is `zookeeper`, the node will get the taint:
-  - `dedicated=zookeeper:NoSchedule`
-- Any other value will be ignored and logged as an error.
+## Supported Labels
 
-## Example Usage
+### Input Label
+- `altinity.cloud/auto-zone`: The desired zone value for the node
 
-### Example: Applying Dedicated Taints
+### Applied Labels
+When a node has the `altinity.cloud/auto-zone` label, the controller will automatically apply:
+- `topology.kubernetes.io/zone`: The current standard Kubernetes zone label
+- `failure-domain.beta.kubernetes.io/zone`: The legacy zone label for backward compatibility
 
-Add the following label to a node:
+## Example
 
-```
-altinity.cloud/auto-taint: "clickhouse"
-```
+To assign a node to zone `eu-central-1a`, apply the following label:
 
-This will apply the following taint to the node:
-- `dedicated=clickhouse:NoSchedule`
-
-Add the following label to a node:
-
-```
-altinity.cloud/auto-taint: "zookeeper"
+```bash
+kubectl label node <node-name> altinity.cloud/auto-zone=eu-central-1a
 ```
 
-This will apply the following taint to the node:
-- `dedicated=zookeeper:NoSchedule`
-
-### Example: Applying Zone Label
-
-Add the following label to a node:
-
-```
-altinity.cloud/auto-zone: "eu-central-1a"
-```
-
-This will apply the following label to the node:
+The controller will then automatically apply:
 - `topology.kubernetes.io/zone=eu-central-1a`
+- `failure-domain.beta.kubernetes.io/zone=eu-central-1a`
 
-### Example: Always Applied Label
+## Deployment
 
-Every node processed by the controller will always have the following label applied:
-- `altinity.cloud/use=anywhere`
+Deploy the controller using the provided manifests:
 
----
+```bash
+kubectl apply -f deploy/
+```
 
-**Note:**
-- The following labels are NOT currently supported by the controller and are ignored if set:
-  - `altinity.cloud/auto-taints`
-  - `altinity.cloud/auto-labels`
-- Only the features described above are implemented.
+This will create:
+- A deployment running the controller
+- RBAC permissions for the controller to read and update nodes
+
